@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "EA FC Companion",
+    "slug": "ea-fc-companion",
+    "version": "1.0.0",
+    "sdkVersion": "57.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0d1117"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.eafc.companion"
+    },
+    "android": {
+      "backgroundColor": "#0d1117",
+      "package": "com.eafc.companion"
+    },
+    "plugins": [
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "DEFAULT"
+        }
+      ]
+    ]
+  }
+}
