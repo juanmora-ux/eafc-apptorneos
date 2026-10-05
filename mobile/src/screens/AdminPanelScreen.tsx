@@ -9,26 +9,40 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  TextInput,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../context/AuthContext';
-import { Tournament, Round, Profile, TournamentParticipant } from '../types/database';
+import { Tournament, Round, Profile, TournamentParticipant, Club, Player } from '../types/database';
 import { generateRoundRobinFixture } from '../utils/fixtureGenerator';
+
+type AdminTab = 'fixture' | 'results' | 'players';
 
 export const AdminPanelScreen: React.FC = () => {
   const { profile, user, refreshProfile } = useAuth();
 
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<AdminTab>('fixture');
   const [activeTournament, setActiveTournament] = useState<Tournament | null>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [availablePlayers, setAvailablePlayers] = useState<Profile[]>([]);
-  const [disputedMatches, setDisputedMatches] = useState<any[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Cargar estado del torneo, jornadas y participantes
+  // --- Estado para Edición de Resultados ---
+  const [matches, setMatches] = useState<any[]>([]);
+  const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
+  const [homeScoreInput, setHomeScoreInput] = useState('');
+  const [awayScoreInput, setAwayScoreInput] = useState('');
+
+  // --- Estado para Gestión/Eliminación de Jugadores ---
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+  const [clubPlayers, setClubPlayers] = useState<Player[]>([]);
+
+  // Cargar datos administrativos
   const loadAdminData = useCallback(async () => {
     setLoading(true);
     try {
@@ -43,7 +57,7 @@ export const AdminPanelScreen: React.FC = () => {
       setActiveTournament(currentTourney);
 
       if (currentTourney) {
-        // 2. Cargar jornadas del torneo
+        // 2. Cargar jornadas
         const { data: roundsData } = await supabase
           .from('rounds')
           .select('*')
@@ -52,35 +66,54 @@ export const AdminPanelScreen: React.FC = () => {
 
         if (roundsData) setRounds(roundsData as Round[]);
 
-        // 3. Cargar partidos en disputa que requieren arbitraje
-        const { data: disputes } = await supabase
+        // 3. Cargar partidos para edición
+        const { data: matchesData } = await supabase
           .from('matches')
-          .select('*, home_user:home_user_id(username), away_user:away_user_id(username), home_club:home_club_id(name), away_club:away_club_id(name)')
+          .select('*, home_user:home_user_id(username), away_user:away_user_id(username), home_club:home_club_id(short_name), away_club:away_club_id(short_name), rounds(name)')
           .eq('tournament_id', currentTourney.id)
-          .eq('status', 'disputed');
+          .order('created_at', { ascending: false });
 
-        if (disputes) setDisputedMatches(disputes);
+        if (matchesData) setMatches(matchesData);
       }
 
-      // 4. Cargar jugadores registrados que ya giraron la ruleta
+      // 4. Cargar perfiles registrados
       const { data: players } = await supabase
         .from('profiles')
         .select('*')
         .not('assigned_club_id', 'is', null);
 
       if (players) setAvailablePlayers(players as Profile[]);
+
+      // 5. Cargar lista de clubes
+      const { data: clubsData } = await supabase.from('clubs').select('*').order('name');
+      if (clubsData) {
+        setClubs(clubsData as Club[]);
+        if (clubsData.length > 0 && !selectedClubId) {
+          setSelectedClubId(clubsData[0].id);
+          fetchPlayersByClub(clubsData[0].id);
+        }
+      }
     } catch (err: any) {
       console.error('Error loading admin data:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedClubId]);
 
   useEffect(() => {
     loadAdminData();
   }, [loadAdminData]);
 
-  // Permitir promover a admin para pruebas locales de la evaluación
+  const fetchPlayersByClub = async (clubId: string) => {
+    setSelectedClubId(clubId);
+    const { data } = await supabase
+      .from('players')
+      .select('*')
+      .eq('club_id', clubId)
+      .order('rating', { ascending: false });
+    setClubPlayers((data as Player[]) || []);
+  };
+
   const handleMakeMeAdmin = async () => {
     if (!user?.id) return;
     try {
@@ -93,24 +126,20 @@ export const AdminPanelScreen: React.FC = () => {
   };
 
   /**
-   * Generación y Creación Oficial del Torneo Round-Robin (Ida y Vuelta)
+   * 1. Generación de Torneo y Fixture
    */
   const handleStartTournament = async () => {
     if (availablePlayers.length < 2) {
-      Alert.alert(
-        'Participantes Insuficientes',
-        'Se requieren al menos 2 jugadores con club asignado en la ruleta para iniciar el campeonato.'
-      );
+      Alert.alert('Inmposible Sorteo', 'Se requieren al menos 2 jugadores con club asignado.');
       return;
     }
 
     setActionLoading(true);
     try {
-      // 1. Crear el Torneo
       const { data: newTourney, error: tErr } = await supabase
         .from('tournaments')
         .insert({
-          name: 'Liga de Campeones EA FC (Ida y Vuelta)',
+          name: 'Liga de Campeones EA FC',
           status: 'in_progress',
           created_by: user?.id,
         })
@@ -119,7 +148,6 @@ export const AdminPanelScreen: React.FC = () => {
 
       if (tErr || !newTourney) throw new Error(tErr?.message || 'Error al crear torneo.');
 
-      // 2. Registrar los participantes en el torneo
       const participantsPayload = availablePlayers.map((p) => ({
         tournament_id: newTourney.id,
         user_id: p.id,
@@ -131,16 +159,12 @@ export const AdminPanelScreen: React.FC = () => {
         .insert(participantsPayload)
         .select();
 
-      if (partErr || !insertedParticipants) throw new Error(partErr?.message || 'Error registrando participantes.');
+      if (partErr || !insertedParticipants) throw new Error(partErr?.message);
 
-      // 3. Ejecutar Algoritmo Round-Robin de Berger (Ida y Vuelta)
       const generatedFixture = generateRoundRobinFixture(insertedParticipants as TournamentParticipant[]);
 
-      // 4. Crear las jornadas (rounds) y partidos (matches)
       for (const roundData of generatedFixture) {
-        // La Jornada 1 comienza activa por defecto, las siguientes en espera
         const isFirst = roundData.round_number === 1;
-
         const { data: createdRound, error: rErr } = await supabase
           .from('rounds')
           .insert({
@@ -155,7 +179,6 @@ export const AdminPanelScreen: React.FC = () => {
 
         if (rErr || !createdRound) continue;
 
-        // Inserción masiva de partidos de esta jornada
         const matchesPayload = roundData.matches.map((m) => ({
           tournament_id: newTourney.id,
           round_id: createdRound.id,
@@ -171,16 +194,12 @@ export const AdminPanelScreen: React.FC = () => {
         await supabase.from('matches').insert(matchesPayload);
       }
 
-      // Actualizar total de jornadas en el torneo
       await supabase
         .from('tournaments')
         .update({ total_rounds: generatedFixture.length })
         .eq('id', newTourney.id);
 
-      Alert.alert(
-        '¡Torneo Iniciado!',
-        `Se ha generado exitosamente el calendario Todos contra Todos con ${generatedFixture.length} jornadas de Ida y Vuelta.`
-      );
+      Alert.alert('¡Sorteo Exitoso!', `Se generaron ${generatedFixture.length} jornadas completas.`);
       loadAdminData();
     } catch (err: any) {
       Alert.alert('Error al iniciar torneo', err.message);
@@ -190,7 +209,7 @@ export const AdminPanelScreen: React.FC = () => {
   };
 
   /**
-   * Habilitación secuencial de Fechas de juego (Switch ON / OFF)
+   * 2. Control de Jornadas (Switch)
    */
   const handleToggleRound = async (round: Round) => {
     const newStatus = !round.is_active;
@@ -213,29 +232,66 @@ export const AdminPanelScreen: React.FC = () => {
   };
 
   /**
-   * Arbitraje Remoto: Resolver partido en disputa
+   * 3. Edición de Marcadores por Arbitraje
    */
-  const handleResolveDispute = async (matchId: string, homeScore: number, awayScore: number) => {
+  const handleUpdateMatchScore = async (matchId: string) => {
+    const hScore = parseInt(homeScoreInput, 10);
+    const aScore = parseInt(awayScoreInput, 10);
+
+    if (isNaN(hScore) || isNaN(aScore) || hScore < 0 || aScore < 0) {
+      Alert.alert('Marcador Inválido', 'Ingresa números enteros válidos.');
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('matches')
         .update({
-          home_score: homeScore,
-          away_score: awayScore,
+          home_score: hScore,
+          away_score: aScore,
           status: 'finished',
           resolved_by: user?.id,
         })
         .eq('id', matchId);
 
-      if (error) {
-        Alert.alert('Error al resolver disputa', error.message);
-      } else {
-        Alert.alert('Disputa Resuelta', 'El marcador ha sido oficializado por el Administrador.');
-        loadAdminData();
-      }
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+      if (error) throw error;
+
+      Alert.alert('Éxito', 'El resultado fue modificado por el Administrador.');
+      setEditingMatchId(null);
+      setHomeScoreInput('');
+      setAwayScoreInput('');
+      loadAdminData();
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
     }
+  };
+
+  /**
+   * 4. Eliminación de Jugador
+   */
+  const handleDeletePlayer = (player: Player) => {
+    Alert.alert(
+      'Confirmar Eliminación',
+      `¿Deseas eliminar a ${player.name} (${player.position} - OVR ${player.rating})?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.from('players').delete().eq('id', player.id);
+              if (error) throw error;
+
+              Alert.alert('Eliminado', `${player.name} fue borrado correctamente.`);
+              if (selectedClubId) fetchPlayersByClub(selectedClubId);
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -247,7 +303,6 @@ export const AdminPanelScreen: React.FC = () => {
     );
   }
 
-  // Si el usuario no es admin, mostrar advertencia con opción de activar rol de prueba
   if (profile?.role !== 'admin') {
     return (
       <View style={styles.container}>
@@ -257,7 +312,7 @@ export const AdminPanelScreen: React.FC = () => {
             <Ionicons name="lock-closed" size={60} color="#f59e0b" />
             <Text style={styles.unauthorizedTitle}>ACCESO RESTRINGIDO</Text>
             <Text style={styles.unauthorizedSubtitle}>
-              Este módulo está reservado exclusivamente para los árbitros y administradores del torneo.
+              Módulo exclusivo para administradores del torneo.
             </Text>
             <TouchableOpacity style={styles.promoteBtn} onPress={handleMakeMeAdmin}>
               <Text style={styles.promoteBtnText}>HABILITAR MODO ADMIN (TESTING)</Text>
@@ -272,137 +327,195 @@ export const AdminPanelScreen: React.FC = () => {
     <View style={styles.container}>
       <StatusBar style="light" />
       <LinearGradient colors={['#070a0f', '#0d131f', '#081726']} style={styles.gradient}>
-        <ScrollView contentContainerStyle={styles.scroll}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.adminTag}>PANEL DE CONTROL</Text>
-              <Text style={styles.headerTitle}>ADMINISTRACIÓN DEL TORNEO</Text>
-            </View>
-            <TouchableOpacity onPress={loadAdminData} style={styles.refreshBtn}>
-              <Ionicons name="refresh" size={20} color="#00ff87" />
-            </TouchableOpacity>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.adminTag}>PANEL DE CONTROL</Text>
+            <Text style={styles.headerTitle}>ADMINISTRACIÓN DEL TORNEO</Text>
           </View>
+          <TouchableOpacity onPress={loadAdminData} style={styles.refreshBtn}>
+            <Ionicons name="refresh" size={20} color="#00ff87" />
+          </TouchableOpacity>
+        </View>
 
-          {/* ESTADO 1: Torneo no iniciado o en Draft */}
-          {!activeTournament ? (
-            <View style={styles.card}>
-              <Ionicons name="trophy" size={40} color="#00ff87" />
-              <Text style={styles.cardTitle}>INICIAR NUEVA TEMPORADA</Text>
-              <Text style={styles.cardDesc}>
-                Genera automáticamente el fixture de ida y vuelta para todos los usuarios registrados.
-              </Text>
+        {/* NAVEGACIÓN POR PESTAÑAS DENTRO DEL PANEL */}
+        <View style={styles.tabsRow}>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'fixture' && styles.tabBtnActive]}
+            onPress={() => setActiveTab('fixture')}
+          >
+            <Ionicons name="shuffle" size={16} color={activeTab === 'fixture' ? '#070a0f' : '#64748b'} />
+            <Text style={[styles.tabBtnText, activeTab === 'fixture' && styles.tabBtnTextActive]}>Fixture</Text>
+          </TouchableOpacity>
 
-              <View style={styles.playersBadge}>
-                <Ionicons name="people" size={18} color="#00ff87" />
-                <Text style={styles.playersCount}>
-                  {availablePlayers.length} Jugadores con club asignado
-                </Text>
-              </View>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'results' && styles.tabBtnActive]}
+            onPress={() => setActiveTab('results')}
+          >
+            <Ionicons name="create" size={16} color={activeTab === 'results' ? '#070a0f' : '#64748b'} />
+            <Text style={[styles.tabBtnText, activeTab === 'results' && styles.tabBtnTextActive]}>Resultados</Text>
+          </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.actionBtn}
-                onPress={handleStartTournament}
-                disabled={actionLoading}
-              >
-                <LinearGradient
-                  colors={['#00ff87', '#00b4d8']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.actionBtnGrad}
-                >
-                  {actionLoading ? (
-                    <ActivityIndicator color="#070a0f" />
-                  ) : (
-                    <Text style={styles.actionBtnText}>GENERAR FIXTURE IDA Y VUELTA</Text>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            /* ESTADO 2: Torneo en progreso -> Control de Fechas */
-            <View>
-              <View style={styles.statusBanner}>
-                <View style={styles.activeDot} />
-                <Text style={styles.statusBannerText}>
-                  TORNEO ACTIVO: {activeTournament.name.toUpperCase()}
-                </Text>
-              </View>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'players' && styles.tabBtnActive]}
+            onPress={() => setActiveTab('players')}
+          >
+            <Ionicons name="people-circle" size={16} color={activeTab === 'players' ? '#070a0f' : '#64748b'} />
+            <Text style={[styles.tabBtnText, activeTab === 'players' && styles.tabBtnTextActive]}>Jugadores</Text>
+          </TouchableOpacity>
+        </View>
 
-              {/* SECCIÓN 1: HABILITACIÓN SECUENCIAL DE FECHAS */}
-              <Text style={styles.sectionHeading}>HABILITAR FECHAS DE JUEGO</Text>
-              <Text style={styles.sectionSubtitle}>
-                Los jugadores solo pueden ingresar a jugar partidos en fechas habilitadas.
-              </Text>
-
-              <View style={styles.roundsList}>
-                {rounds.map((round) => (
-                  <View key={round.id} style={styles.roundRow}>
-                    <View style={styles.roundInfo}>
-                      <Text style={styles.roundName}>{round.name}</Text>
-                      <Text
-                        style={[
-                          styles.roundStatus,
-                          round.is_active ? styles.roundActive : styles.roundInactive,
-                        ]}
-                      >
-                        {round.is_active ? 'HABILITADA PARA JUGAR' : 'BLOQUEADA'}
-                      </Text>
-                    </View>
-                    <Switch
-                      value={round.is_active}
-                      onValueChange={() => handleToggleRound(round)}
-                      thumbColor={round.is_active ? '#00ff87' : '#64748b'}
-                      trackColor={{ false: '#1e293b', true: 'rgba(0, 255, 135, 0.3)' }}
-                    />
-                  </View>
-                ))}
-              </View>
-
-              {/* SECCIÓN 2: ARBITRAJE REMOTO (PARTIDOS EN DISPUTA) */}
-              <Text style={[styles.sectionHeading, { marginTop: 28 }]}>
-                ARBITRAJE REMOTO (DISPUTAS)
-              </Text>
-
-              {disputedMatches.length === 0 ? (
-                <View style={styles.noDisputesBox}>
-                  <Ionicons name="checkmark-done-circle" size={24} color="#00ff87" />
-                  <Text style={styles.noDisputesText}>No hay partidos en disputa en este momento.</Text>
+        {/* CONTENIDO SEGÚN LA PESTAÑA SELECCIONADA */}
+        <View style={{ flex: 1 }}>
+          {activeTab === 'fixture' && (
+            <ScrollView contentContainerStyle={styles.scroll}>
+              {!activeTournament ? (
+                <View style={styles.card}>
+                  <Ionicons name="trophy" size={40} color="#00ff87" />
+                  <Text style={styles.cardTitle}>INICIAR NUEVA TEMPORADA</Text>
+                  <Text style={styles.cardDesc}>
+                    Genera automáticamente el fixture de ida y vuelta para todos los usuarios registrados.
+                  </Text>
+                  <TouchableOpacity style={styles.actionBtn} onPress={handleStartTournament} disabled={actionLoading}>
+                    <LinearGradient colors={['#00ff87', '#00b4d8']} style={styles.actionBtnGrad}>
+                      {actionLoading ? <ActivityIndicator color="#070a0f" /> : <Text style={styles.actionBtnText}>GENERAR FIXTURE IDA Y VUELTA</Text>}
+                    </LinearGradient>
+                  </TouchableOpacity>
                 </View>
               ) : (
-                disputedMatches.map((m) => (
-                  <View key={m.id} style={styles.disputeCard}>
-                    <View style={styles.disputeHeader}>
-                      <Ionicons name="warning" size={18} color="#f59e0b" />
-                      <Text style={styles.disputeTitle}>DISCREPANCIA EN MARCADOR</Text>
-                    </View>
-
-                    <Text style={styles.matchTeams}>
-                      {m.home_club?.name} (@{m.home_user?.username}) vs {m.away_club?.name} (@{m.away_user?.username})
-                    </Text>
-
-                    <Text style={styles.disputeMotivo}>
-                      Motivo: {m.dispute_reason || 'Visitante rechazó el marcador reportado por el local.'}
-                    </Text>
-
-                    <Text style={styles.reportedScore}>
-                      Marcador reportado: {m.home_score} - {m.away_score}
-                    </Text>
-
-                    <View style={styles.disputeActions}>
-                      <TouchableOpacity
-                        style={styles.resolveConfirmBtn}
-                        onPress={() => handleResolveDispute(m.id, m.home_score, m.away_score)}
-                      >
-                        <Text style={styles.resolveBtnText}>VALIDAR RESULTADO</Text>
-                      </TouchableOpacity>
-                    </View>
+                <View>
+                  <Text style={styles.sectionHeading}>HABILITAR FECHAS DE JUEGO</Text>
+                  <View style={styles.roundsList}>
+                    {rounds.map((round) => (
+                      <View key={round.id} style={styles.roundRow}>
+                        <View style={styles.roundInfo}>
+                          <Text style={styles.roundName}>{round.name}</Text>
+                          <Text style={[styles.roundStatus, round.is_active ? styles.roundActive : styles.roundInactive]}>
+                            {round.is_active ? 'HABILITADA PARA JUGAR' : 'BLOQUEADA'}
+                          </Text>
+                        </View>
+                        <Switch
+                          value={round.is_active}
+                          onValueChange={() => handleToggleRound(round)}
+                          thumbColor={round.is_active ? '#00ff87' : '#64748b'}
+                          trackColor={{ false: '#1e293b', true: 'rgba(0, 255, 135, 0.3)' }}
+                        />
+                      </View>
+                    ))}
                   </View>
-                ))
+                </View>
               )}
+            </ScrollView>
+          )}
+
+          {activeTab === 'results' && (
+            <FlatList
+              data={matches}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 30 }}
+              renderItem={({ item }) => {
+                const isEditing = editingMatchId === item.id;
+                return (
+                  <View style={styles.matchCard}>
+                    <Text style={styles.roundLabel}>{item.rounds?.name || 'Jornada'}</Text>
+                    <View style={styles.matchTeamsRow}>
+                      <View style={styles.teamCol}>
+                        <Text style={styles.teamName}>{item.home_club?.short_name}</Text>
+                        <Text style={styles.userName}>@{item.home_user?.username}</Text>
+                      </View>
+
+                      {isEditing ? (
+                        <View style={styles.editScoreRow}>
+                          <TextInput
+                            style={styles.scoreInput}
+                            keyboardType="numeric"
+                            value={homeScoreInput}
+                            onChangeText={setHomeScoreInput}
+                          />
+                          <Text style={{ color: '#fff', fontWeight: '900' }}>-</Text>
+                          <TextInput
+                            style={styles.scoreInput}
+                            keyboardType="numeric"
+                            value={awayScoreInput}
+                            onChangeText={setAwayScoreInput}
+                          />
+                        </View>
+                      ) : (
+                        <Text style={styles.matchScore}>{item.home_score} - {item.away_score}</Text>
+                      )}
+
+                      <View style={styles.teamCol}>
+                        <Text style={styles.teamName}>{item.away_club?.short_name}</Text>
+                        <Text style={styles.userName}>@{item.away_user?.username}</Text>
+                      </View>
+                    </View>
+
+                    {isEditing ? (
+                      <View style={styles.matchActionsRow}>
+                        <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditingMatchId(null)}>
+                          <Text style={styles.cancelBtnText}>CANCELAR</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.saveScoreBtn} onPress={() => handleUpdateMatchScore(item.id)}>
+                          <Text style={styles.saveScoreBtnText}>GUARDAR</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.editMatchBtn}
+                        onPress={() => {
+                          setEditingMatchId(item.id);
+                          setHomeScoreInput(item.home_score.toString());
+                          setAwayScoreInput(item.away_score.toString());
+                        }}
+                      >
+                        <Ionicons name="pencil" size={14} color="#00ff87" />
+                        <Text style={styles.editMatchBtnText}>CAMBIAR RESULTADO</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              }}
+            />
+          )}
+
+          {activeTab === 'players' && (
+            <View style={{ flex: 1, paddingHorizontal: 16 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.clubsRow}>
+                {clubs.map((c) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.clubChip, selectedClubId === c.id && styles.clubChipActive]}
+                    onPress={() => fetchPlayersByClub(c.id)}
+                  >
+                    <Text style={[styles.clubChipText, selectedClubId === c.id && styles.clubChipTextActive]}>
+                      {c.short_name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <FlatList
+                data={clubPlayers}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={{ paddingBottom: 30 }}
+                renderItem={({ item }) => (
+                  <View style={styles.playerRow}>
+                    <View style={styles.playerInfo}>
+                      <View style={styles.posTag}>
+                        <Text style={styles.posTagText}>{item.position}</Text>
+                      </View>
+                      <Text style={styles.playerName}>{item.name}</Text>
+                      <Text style={styles.playerOvr}>OVR {item.rating}</Text>
+                    </View>
+
+                    <TouchableOpacity style={styles.deletePlayerBtn} onPress={() => handleDeletePlayer(item)}>
+                      <Ionicons name="trash-outline" size={18} color="#e53e3e" />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              />
             </View>
           )}
-        </ScrollView>
+        </View>
       </LinearGradient>
     </View>
   );
@@ -425,7 +538,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    paddingHorizontal: 16,
+    marginBottom: 12,
   },
   adminTag: {
     fontSize: 11,
@@ -443,6 +557,34 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 10,
+  },
+  tabsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    padding: 4,
+    marginHorizontal: 16,
+    marginBottom: 14,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  tabBtnActive: {
+    backgroundColor: '#00ff87',
+  },
+  tabBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748b',
+  },
+  tabBtnTextActive: {
+    color: '#070a0f',
   },
   card: {
     backgroundColor: '#0f172a',
@@ -466,21 +608,6 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     lineHeight: 18,
   },
-  playersBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 255, 135, 0.08)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    gap: 8,
-    marginVertical: 12,
-  },
-  playersCount: {
-    fontSize: 12,
-    color: '#00ff87',
-    fontWeight: '700',
-  },
   actionBtn: {
     width: '100%',
     borderRadius: 12,
@@ -497,41 +624,12 @@ const styles = StyleSheet.create({
     color: '#070a0f',
     letterSpacing: 1,
   },
-  statusBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 255, 135, 0.1)',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
-    marginBottom: 20,
-    gap: 8,
-  },
-  activeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#00ff87',
-  },
-  statusBannerText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#00ff87',
-    letterSpacing: 1,
-  },
   sectionHeading: {
     fontSize: 14,
     fontWeight: '900',
     color: '#ffffff',
     letterSpacing: 1,
-  },
-  sectionSubtitle: {
-    fontSize: 11,
-    color: '#64748b',
-    marginTop: 4,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   roundsList: {
     backgroundColor: '#0f172a',
@@ -568,69 +666,165 @@ const styles = StyleSheet.create({
   roundInactive: {
     color: '#64748b',
   },
-  noDisputesBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0f172a',
-    padding: 16,
-    borderRadius: 12,
-    gap: 10,
-    marginTop: 8,
-  },
-  noDisputesText: {
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  disputeCard: {
+  matchCard: {
     backgroundColor: '#0f172a',
     borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.4)',
-    padding: 16,
-    marginTop: 10,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  disputeHeader: {
+  roundLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#00ff87',
+    marginBottom: 8,
+  },
+  matchTeamsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  teamCol: {
+    alignItems: 'center',
+    width: '35%',
+  },
+  teamName: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+  userName: {
+    fontSize: 10,
+    color: '#64748b',
+  },
+  matchScore: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#00ff87',
+  },
+  editScoreRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 6,
   },
-  disputeTitle: {
-    fontSize: 12,
+  scoreInput: {
+    backgroundColor: '#1e293b',
+    color: '#ffffff',
+    width: 40,
+    height: 36,
+    borderRadius: 8,
+    textAlign: 'center',
+    fontWeight: '900',
+    borderWidth: 1,
+    borderColor: '#00ff87',
+  },
+  editMatchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  editMatchBtnText: {
+    fontSize: 10,
     fontWeight: '800',
-    color: '#f59e0b',
+    color: '#00ff87',
   },
-  matchTeams: {
-    fontSize: 14,
+  matchActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 10,
+  },
+  cancelBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  cancelBtnText: {
+    fontSize: 10,
+    color: '#e53e3e',
+    fontWeight: '800',
+  },
+  saveScoreBtn: {
+    backgroundColor: '#00ff87',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  saveScoreBtnText: {
+    fontSize: 10,
+    color: '#070a0f',
+    fontWeight: '900',
+  },
+  clubsRow: {
+    flexDirection: 'row',
+    maxHeight: 40,
+    marginBottom: 12,
+  },
+  clubChip: {
+    backgroundColor: '#0f172a',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  clubChipActive: {
+    backgroundColor: '#00ff87',
+  },
+  clubChipText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748b',
+  },
+  clubChipTextActive: {
+    color: '#070a0f',
+  },
+  playerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  playerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  posTag: {
+    backgroundColor: 'rgba(0, 255, 135, 0.1)',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 135, 0.3)',
+  },
+  posTagText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#00ff87',
+  },
+  playerName: {
+    fontSize: 13,
     fontWeight: '800',
     color: '#ffffff',
   },
-  disputeMotivo: {
-    fontSize: 11,
-    color: '#ef4444',
-    marginVertical: 4,
+  playerOvr: {
+    fontSize: 10,
+    color: '#64748b',
   },
-  reportedScore: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#94a3b8',
-    marginBottom: 10,
-  },
-  disputeActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  resolveConfirmBtn: {
-    backgroundColor: '#00ff87',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+  deletePlayerBtn: {
+    padding: 6,
+    backgroundColor: 'rgba(229, 62, 62, 0.1)',
     borderRadius: 8,
-    alignItems: 'center',
-  },
-  resolveBtnText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#070a0f',
   },
   centerContainer: {
     flex: 1,

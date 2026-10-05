@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,36 +22,42 @@ const { width } = Dimensions.get('window');
 const PITCH_WIDTH = width - 32;
 const PITCH_HEIGHT = PITCH_WIDTH * 1.38;
 
-// Configuraciones de Formaciones Tácticas con coordenadas relativas (0 a 1)
+const BOUNDS: TokenBounds = {
+  minX: 12,
+  maxX: PITCH_WIDTH - 58,
+  minY: 12,
+  maxY: PITCH_HEIGHT - 62,
+};
+
 const FORMATIONS: Record<string, { label: string; coords: { x: number; y: number; pos: string }[] }> = {
   '4-3-3': {
     label: '4-3-3 (Ofensiva)',
     coords: [
-      { x: 0.50, y: 0.90, pos: 'GK' },
+      { x: 0.50, y: 0.88, pos: 'GK' },
       { x: 0.15, y: 0.72, pos: 'LB' },
-      { x: 0.38, y: 0.76, pos: 'CB' },
-      { x: 0.62, y: 0.76, pos: 'CB' },
+      { x: 0.38, y: 0.75, pos: 'CB' },
+      { x: 0.62, y: 0.75, pos: 'CB' },
       { x: 0.85, y: 0.72, pos: 'RB' },
       { x: 0.50, y: 0.56, pos: 'CDM' },
-      { x: 0.28, y: 0.44, pos: 'CM' },
-      { x: 0.72, y: 0.44, pos: 'CM' },
-      { x: 0.16, y: 0.22, pos: 'LW' },
-      { x: 0.50, y: 0.16, pos: 'ST' },
-      { x: 0.84, y: 0.22, pos: 'RW' },
+      { x: 0.28, y: 0.42, pos: 'CM' },
+      { x: 0.72, y: 0.42, pos: 'CM' },
+      { x: 0.18, y: 0.22, pos: 'LW' },
+      { x: 0.50, y: 0.15, pos: 'ST' },
+      { x: 0.82, y: 0.22, pos: 'RW' },
     ],
   },
   '4-4-2': {
     label: '4-4-2 (Clásica)',
     coords: [
-      { x: 0.50, y: 0.90, pos: 'GK' },
+      { x: 0.50, y: 0.88, pos: 'GK' },
       { x: 0.15, y: 0.72, pos: 'LB' },
-      { x: 0.38, y: 0.76, pos: 'CB' },
-      { x: 0.62, y: 0.76, pos: 'CB' },
+      { x: 0.38, y: 0.75, pos: 'CB' },
+      { x: 0.62, y: 0.75, pos: 'CB' },
       { x: 0.85, y: 0.72, pos: 'RB' },
-      { x: 0.14, y: 0.48, pos: 'LM' },
+      { x: 0.15, y: 0.46, pos: 'LM' },
       { x: 0.38, y: 0.50, pos: 'CM' },
       { x: 0.62, y: 0.50, pos: 'CM' },
-      { x: 0.86, y: 0.48, pos: 'RM' },
+      { x: 0.85, y: 0.46, pos: 'RM' },
       { x: 0.36, y: 0.20, pos: 'ST' },
       { x: 0.64, y: 0.20, pos: 'ST' },
     ],
@@ -59,19 +65,38 @@ const FORMATIONS: Record<string, { label: string; coords: { x: number; y: number
   '3-5-2': {
     label: '3-5-2 (Dominio Medio)',
     coords: [
-      { x: 0.50, y: 0.90, pos: 'GK' },
-      { x: 0.25, y: 0.76, pos: 'CB' },
-      { x: 0.50, y: 0.78, pos: 'CB' },
-      { x: 0.75, y: 0.76, pos: 'CB' },
-      { x: 0.10, y: 0.50, pos: 'LWB' },
+      { x: 0.50, y: 0.88, pos: 'GK' },
+      { x: 0.25, y: 0.75, pos: 'CB' },
+      { x: 0.50, y: 0.77, pos: 'CB' },
+      { x: 0.75, y: 0.75, pos: 'CB' },
+      { x: 0.12, y: 0.48, pos: 'LWB' },
       { x: 0.36, y: 0.54, pos: 'CDM' },
       { x: 0.64, y: 0.54, pos: 'CDM' },
-      { x: 0.90, y: 0.50, pos: 'RWB' },
-      { x: 0.50, y: 0.38, pos: 'CAM' },
+      { x: 0.88, y: 0.48, pos: 'RWB' },
+      { x: 0.50, y: 0.36, pos: 'CAM' },
       { x: 0.36, y: 0.18, pos: 'ST' },
       { x: 0.64, y: 0.18, pos: 'ST' },
     ],
   },
+};
+
+const computeFormationPositions = (
+  formationKey: string,
+  currentPlayers: Player[]
+): Record<string, { x: number; y: number; pos: string }> => {
+  const formConfig = FORMATIONS[formationKey] || FORMATIONS['4-3-3'];
+  const newMap: Record<string, { x: number; y: number; pos: string }> = {};
+
+  currentPlayers.forEach((player, index) => {
+    const coord = formConfig.coords[index] || { x: 0.5, y: 0.5, pos: player.position };
+    newMap[player.id] = {
+      x: Math.min(Math.max(coord.x * PITCH_WIDTH - 23, BOUNDS.minX), BOUNDS.maxX),
+      y: Math.min(Math.max(coord.y * PITCH_HEIGHT - 27, BOUNDS.minY), BOUNDS.maxY),
+      pos: coord.pos,
+    };
+  });
+
+  return newMap;
 };
 
 export const TacticsBoardScreen: React.FC = () => {
@@ -81,72 +106,101 @@ export const TacticsBoardScreen: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [players, setPlayers] = useState<Player[]>([]);
   const [selectedFormation, setSelectedFormation] = useState<string>('4-3-3');
-
-  // Mapa de posiciones absolutas: { [playerId]: { x, y, pos } }
   const [playerPositions, setPlayerPositions] = useState<
     Record<string, { x: number; y: number; pos: string }>
   >({});
 
-  // Bounding Box para no salir de la cancha
-  const bounds: TokenBounds = {
-    minX: 12,
-    maxX: PITCH_WIDTH - 58,
-    minY: 12,
-    maxY: PITCH_HEIGHT - 62,
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const handleApplyFormation = (formationKey: string) => {
+    setSelectedFormation(formationKey);
+    if (players.length === 0) return;
+    setPlayerPositions(computeFormationPositions(formationKey, players));
   };
 
-  /**
-   * 1. Cargar jugadores del club y táctica previa guardada en Supabase
-   */
   const loadTacticsData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const clubId = profile?.assigned_club_id;
-      if (!clubId) {
-        setLoading(false);
-        return;
-      }
+    const clubId = profile?.assigned_club_id;
+    const userId = user?.id;
 
-      // 1. Cargar plantilla de jugadores
-      const { data: playersData } = await supabase
+    if (!clubId || !userId) {
+      if (isMounted.current) setLoading(false);
+      return;
+    }
+
+    try {
+      const { data: playersData, error: playersError } = await supabase
         .from('players')
         .select('*')
         .eq('club_id', clubId)
         .order('rating', { ascending: false })
         .limit(11);
 
+      if (playersError) throw playersError;
+
       const teamPlayers = (playersData as Player[]) || [];
+
+      if (!isMounted.current) return;
       setPlayers(teamPlayers);
 
-      // 2. Cargar táctica guardada previamente
+      if (teamPlayers.length === 0) {
+        setLoading(false);
+        return;
+      }
+
       const { data: savedTactic } = await supabase
         .from('tactics')
         .select('*')
-        .eq('user_id', user?.id)
+        .eq('user_id', userId)
         .eq('club_id', clubId)
         .maybeSingle();
 
+      if (!isMounted.current) return;
+
       if (savedTactic && savedTactic.positions && savedTactic.positions.length > 0) {
-        setSelectedFormation(savedTactic.formation || '4-3-3');
+        const activeFormation = savedTactic.formation || '4-3-3';
+        setSelectedFormation(activeFormation);
         const posMap: Record<string, { x: number; y: number; pos: string }> = {};
 
         savedTactic.positions.forEach((p: any) => {
-          posMap[p.player_id] = {
-            x: p.x * PITCH_WIDTH,
-            y: p.y * PITCH_HEIGHT,
-            pos: p.position_label,
-          };
+          if (p.player_id) {
+            posMap[p.player_id] = {
+              x: Math.min(Math.max(p.x * PITCH_WIDTH, BOUNDS.minX), BOUNDS.maxX),
+              y: Math.min(Math.max(p.y * PITCH_HEIGHT, BOUNDS.minY), BOUNDS.maxY),
+              pos: p.position_label || 'CM',
+            };
+          }
+        });
+
+        const formConfig = FORMATIONS[activeFormation] || FORMATIONS['4-3-3'];
+        teamPlayers.forEach((player, idx) => {
+          if (!posMap[player.id]) {
+            const fallbackCoord = formConfig.coords[idx] || { x: 0.5, y: 0.5, pos: player.position };
+            posMap[player.id] = {
+              x: Math.min(Math.max(fallbackCoord.x * PITCH_WIDTH - 23, BOUNDS.minX), BOUNDS.maxX),
+              y: Math.min(Math.max(fallbackCoord.y * PITCH_HEIGHT - 27, BOUNDS.minY), BOUNDS.maxY),
+              pos: fallbackCoord.pos,
+            };
+          }
         });
 
         setPlayerPositions(posMap);
       } else {
-        // Asignación por defecto según formación 4-3-3
-        applyFormation('4-3-3', teamPlayers);
+        setSelectedFormation('4-3-3');
+        setPlayerPositions(computeFormationPositions('4-3-3', teamPlayers));
       }
     } catch (err) {
-      console.error('Error loading tactics:', err);
+      console.error('Error cargando pizarra táctica:', err);
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
   }, [profile?.assigned_club_id, user?.id]);
 
@@ -154,31 +208,6 @@ export const TacticsBoardScreen: React.FC = () => {
     loadTacticsData();
   }, [loadTacticsData]);
 
-  /**
-   * Aplicar una formación táctica predefinida
-   */
-  const applyFormation = (formationKey: string, currentPlayers = players) => {
-    setSelectedFormation(formationKey);
-    const formConfig = FORMATIONS[formationKey];
-    if (!formConfig || currentPlayers.length === 0) return;
-
-    const newMap: Record<string, { x: number; y: number; pos: string }> = {};
-
-    currentPlayers.forEach((player, index) => {
-      const coord = formConfig.coords[index] || { x: 0.5, y: 0.5, pos: player.position };
-      newMap[player.id] = {
-        x: Math.min(Math.max(coord.x * PITCH_WIDTH - 23, bounds.minX), bounds.maxX),
-        y: Math.min(Math.max(coord.y * PITCH_HEIGHT - 23, bounds.minY), bounds.maxY),
-        pos: coord.pos,
-      };
-    });
-
-    setPlayerPositions(newMap);
-  };
-
-  /**
-   * Callback invocado al soltar una ficha con Drag & Drop
-   */
   const handlePositionChange = (playerId: string, newX: number, newY: number) => {
     setPlayerPositions((prev) => ({
       ...prev,
@@ -190,15 +219,11 @@ export const TacticsBoardScreen: React.FC = () => {
     }));
   };
 
-  /**
-   * Persistir en Supabase (public.tactics)
-   */
   const handleSaveTactics = async () => {
     if (!user?.id || !profile?.assigned_club_id) return;
 
     setSaving(true);
     try {
-      // Normalizar coordenadas a rango [0, 1] para independencia de resolución de pantalla
       const positionsPayload = players.map((player) => {
         const current = playerPositions[player.id] || { x: 0, y: 0, pos: player.position };
         return {
@@ -223,12 +248,12 @@ export const TacticsBoardScreen: React.FC = () => {
       if (error) {
         Alert.alert('Error', error.message);
       } else {
-        Alert.alert('¡Táctica Guardada!', 'Tu formación y coordenadas han sido persistidas en Supabase.');
+        Alert.alert('¡Táctica Guardada!', 'Tu formación y coordenadas han sido guardadas con éxito.');
       }
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
-      setSaving(false);
+      if (isMounted.current) setSaving(false);
     }
   };
 
@@ -237,6 +262,33 @@ export const TacticsBoardScreen: React.FC = () => {
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#00ff87" />
         <Text style={styles.loadingText}>Cargando Pizarra Táctica...</Text>
+      </View>
+    );
+  }
+
+  if (!profile?.assigned_club_id) {
+    return (
+      <View style={styles.centerContainer}>
+        <Ionicons name="shield-outline" size={60} color="#64748b" />
+        <Text style={styles.emptyTitle}>SIN CLUB ASIGNADO</Text>
+        <Text style={styles.emptySubtitle}>
+          Gira la ruleta de asignación primero para obtener tu club del torneo.
+        </Text>
+      </View>
+    );
+  }
+
+  if (players.length === 0) {
+    return (
+      <View style={styles.centerContainer}>
+        <Ionicons name="people-outline" size={60} color="#64748b" />
+        <Text style={styles.emptyTitle}>PLANTILLA NO ENCONTRADA</Text>
+        <Text style={styles.emptySubtitle}>
+          No se encontraron jugadores registrados para este club en la base de datos.
+        </Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={loadTacticsData}>
+          <Text style={styles.retryBtnText}>REINTENTAR</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -269,7 +321,7 @@ export const TacticsBoardScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
 
-          {/* Selector de Formaciones Clásicas */}
+          {/* Selector de Formaciones */}
           <View style={styles.formationsBar}>
             {Object.keys(FORMATIONS).map((formKey) => {
               const isSelected = selectedFormation === formKey;
@@ -277,7 +329,7 @@ export const TacticsBoardScreen: React.FC = () => {
                 <TouchableOpacity
                   key={formKey}
                   style={[styles.formationChip, isSelected && styles.formationChipSelected]}
-                  onPress={() => applyFormation(formKey)}
+                  onPress={() => handleApplyFormation(formKey)}
                 >
                   <Text
                     style={[
@@ -292,12 +344,10 @@ export const TacticsBoardScreen: React.FC = () => {
             })}
           </View>
 
-          {/* CONTENEDOR DEL CAMPO DE FÚTBOL CON CANVAS Y FICHAS ARRASTRABLES */}
+          {/* Campo de fútbol con fichas */}
           <View style={[styles.pitchWrapper, { width: PITCH_WIDTH, height: PITCH_HEIGHT }]}>
-            {/* 1. Lienzo Skia 2D (Fondo del campo) */}
             <PitchCanvas width={PITCH_WIDTH} height={PITCH_HEIGHT} />
 
-            {/* 2. Capa de Fichas con Drag & Drop Absoluto (Reanimated 3 + Gesture Handler) */}
             {players.map((player) => {
               const currentPos = playerPositions[player.id];
               if (!currentPos) return null;
@@ -309,14 +359,13 @@ export const TacticsBoardScreen: React.FC = () => {
                   positionLabel={currentPos.pos}
                   initialX={currentPos.x}
                   initialY={currentPos.y}
-                  bounds={bounds}
+                  bounds={BOUNDS}
                   onPositionChange={handlePositionChange}
                 />
               );
             })}
           </View>
 
-          {/* Instrucciones de Uso */}
           <View style={styles.tipsBox}>
             <Ionicons name="information-circle" size={16} color="#00ff87" />
             <Text style={styles.tipsText}>
@@ -331,19 +380,9 @@ export const TacticsBoardScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#070a0f',
-  },
-  gradient: {
-    flex: 1,
-    paddingTop: 45,
-  },
-  scroll: {
-    paddingHorizontal: 16,
-    paddingBottom: 30,
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#070a0f' },
+  gradient: { flex: 1, paddingTop: 45 },
+  scroll: { paddingHorizontal: 16, paddingBottom: 30, alignItems: 'center' },
   header: {
     width: '100%',
     flexDirection: 'row',
@@ -351,19 +390,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#ffffff',
-    letterSpacing: 1.5,
-  },
-  subtitle: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#00ff87',
-    letterSpacing: 1.5,
-    marginTop: 2,
-  },
+  title: { fontSize: 20, fontWeight: '900', color: '#ffffff', letterSpacing: 1.5 },
+  subtitle: { fontSize: 9, fontWeight: '700', color: '#00ff87', letterSpacing: 1.5, marginTop: 2 },
   saveBtn: {
     backgroundColor: '#00ff87',
     flexDirection: 'row',
@@ -373,11 +401,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     gap: 6,
   },
-  saveBtnText: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#070a0f',
-  },
+  saveBtnText: { fontSize: 11, fontWeight: '900', color: '#070a0f' },
   formationsBar: {
     width: '100%',
     flexDirection: 'row',
@@ -397,20 +421,9 @@ const styles = StyleSheet.create({
     borderColor: '#00ff87',
     backgroundColor: 'rgba(0, 255, 135, 0.12)',
   },
-  formationChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94a3b8',
-  },
-  formationChipTextSelected: {
-    color: '#00ff87',
-    fontWeight: '900',
-  },
-  pitchWrapper: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  formationChipText: { fontSize: 12, fontWeight: '700', color: '#94a3b8' },
+  formationChipTextSelected: { color: '#00ff87', fontWeight: '900' },
+  pitchWrapper: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
   tipsBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -422,21 +435,25 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.06)',
     gap: 8,
   },
-  tipsText: {
-    flex: 1,
-    fontSize: 11,
-    color: '#94a3b8',
-    lineHeight: 16,
-  },
+  tipsText: { flex: 1, fontSize: 11, color: '#94a3b8', lineHeight: 16 },
   centerContainer: {
     flex: 1,
     backgroundColor: '#070a0f',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 24,
   },
-  loadingText: {
-    color: '#00ff87',
-    marginTop: 12,
-    fontSize: 13,
+  loadingText: { color: '#00ff87', marginTop: 12, fontSize: 13 },
+  emptyTitle: { fontSize: 16, fontWeight: '900', color: '#ffffff', marginTop: 12, letterSpacing: 1 },
+  emptySubtitle: { fontSize: 12, color: '#64748b', textAlign: 'center', marginTop: 6 },
+  retryBtn: {
+    backgroundColor: 'rgba(0, 255, 135, 0.12)',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#00ff87',
+    marginTop: 16,
   },
+  retryBtnText: { color: '#00ff87', fontWeight: '800', fontSize: 12 },
 });

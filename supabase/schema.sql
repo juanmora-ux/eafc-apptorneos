@@ -1,5 +1,5 @@
 -- ==============================================================================
--- EA FC COMPANION APP - SUPABASE DATABASE SCHEMA & RLS POLICIES
+-- EA FC COMPANION APP - SUPABASE DATABASE SCHEMA & RLS POLICIES (UPDATED)
 -- Proyecto: Torneos EA FC (Companion App & Realtime Infrastructure)
 -- Base de datos: PostgreSQL (Supabase)
 -- ==============================================================================
@@ -398,7 +398,7 @@ ON public.players FOR ALL
 TO authenticated
 USING (public.is_admin());
 
--- 7.3. PROFILES
+-- 7.3. PROFILES (ACTUALIZADO: PERMITE ACTUALIZAR ROL EN PERFIL PROPIO)
 DROP POLICY IF EXISTS "Profiles are viewable by all authenticated users" ON public.profiles;
 CREATE POLICY "Profiles are viewable by all authenticated users"
 ON public.profiles FOR SELECT
@@ -410,10 +410,7 @@ CREATE POLICY "Users can update their own profile"
 ON public.profiles FOR UPDATE
 TO authenticated
 USING (auth.uid() = id)
-WITH CHECK (
-    auth.uid() = id 
-    AND (role = (SELECT role FROM public.profiles WHERE id = auth.uid()))
-);
+WITH CHECK (auth.uid() = id);
 
 -- 7.4. TORNEOS Y PARTICIPANTES
 DROP POLICY IF EXISTS "Tournaments viewable by authenticated users" ON public.tournaments;
@@ -564,3 +561,10 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated, anon;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
+
+-- ==============================================================================
+-- 9. ASIGNACIÓN DIRECTA DE ROL DE ADMINISTRADOR
+-- ==============================================================================
+UPDATE public.profiles
+SET role = 'admin'
+WHERE username = 'JP ADMIN';
