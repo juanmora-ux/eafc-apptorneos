@@ -36,7 +36,11 @@ const MainTabsNavigator: React.FC = () => {
 
   // 2. Si el usuario aún no gira la ruleta, forzar la pantalla de Ruleta de Asignación
   if (!profile?.has_spun_wheel) {
-    return <ClubWheelScreen />;
+    return (
+      <ClubWheelScreen
+        onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
+      />
+    );
   }
 
   // 3. Si el usuario entra a un partido activo en vivo -> Pantalla Horizontal Exclusiva
@@ -53,7 +57,11 @@ const MainTabsNavigator: React.FC = () => {
   const renderCurrentScreen = () => {
     switch (activeTab) {
       case 'club':
-        return <ClubWheelScreen />;
+        return (
+          <ClubWheelScreen
+            onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
+          />
+        );
       case 'tactics':
         return <TacticsBoardScreen />;
       case 'fixture':
@@ -63,7 +71,11 @@ const MainTabsNavigator: React.FC = () => {
       case 'admin':
         return <AdminPanelScreen />;
       default:
-        return <ClubWheelScreen />;
+        return (
+          <ClubWheelScreen
+            onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
+          />
+        );
     }
   };
 

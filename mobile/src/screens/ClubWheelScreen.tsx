@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -27,7 +27,11 @@ const { width } = Dimensions.get('window');
 const WHEEL_SIZE = Math.min(width * 0.85, 340);
 const RADIUS = WHEEL_SIZE / 2;
 
-export const ClubWheelScreen: React.FC = () => {
+interface ClubWheelScreenProps {
+  onNavigateToLeaderboard?: () => void;
+}
+
+export const ClubWheelScreen: React.FC<ClubWheelScreenProps> = ({ onNavigateToLeaderboard }) => {
   const { user, profile, refreshProfile, signOut } = useAuth();
 
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -37,15 +41,12 @@ export const ClubWheelScreen: React.FC = () => {
   const [winnerModalVisible, setWinnerModalVisible] = useState(false);
   const [selectedClub, setSelectedClub] = useState<Club | null>(null);
 
-  // Valor compartido de Reanimated para la rotación (grados)
   const rotation = useSharedValue(0);
 
-  // 1. Cargar la lista oficial de clubes desde Supabase
   useEffect(() => {
     fetchClubs();
   }, []);
 
-  // 2. Si el usuario ya tiene un club asignado persistente en la BD, cargarlo
   useEffect(() => {
     if (profile?.assigned_club_id && clubs.length > 0) {
       const found = clubs.find((c) => c.id === profile.assigned_club_id);
@@ -75,9 +76,15 @@ export const ClubWheelScreen: React.FC = () => {
   };
 
   /**
-   * Persistencia en Supabase: Se invoca al terminar la animación en el UI Thread
-   * mediante runOnJS para mantener la sincronización entre hilo nativo y JavaScript.
+   * Redirección a la pantalla de Posiciones
    */
+  const handleGoToLeaderboard = async () => {
+    await refreshProfile();
+    if (onNavigateToLeaderboard) {
+      onNavigateToLeaderboard();
+    }
+  };
+
   const handleSpinEnd = async (winningClub: Club) => {
     setIsSpinning(false);
     setSelectedClub(winningClub);
@@ -87,7 +94,6 @@ export const ClubWheelScreen: React.FC = () => {
     if (!user?.id) return;
 
     try {
-      // Actualización persistente en la tabla public.profiles
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -107,43 +113,33 @@ export const ClubWheelScreen: React.FC = () => {
     }
   };
 
-  // Función para disparar la ruleta
   const spinWheel = () => {
     if (isSpinning || profile?.has_spun_wheel || clubs.length === 0) return;
 
     setIsSpinning(true);
 
-    // Seleccionar aleatoriamente el club ganador
     const randomIndex = Math.floor(Math.random() * clubs.length);
     const winningClub = clubs[randomIndex];
 
-    // Cálculo matemático:
-    // Cada sector de la ruleta ocupa (360 / total_clubes) grados.
     const segmentAngle = 360 / clubs.length;
-    // 5 a 8 vueltas completas para emoción visual + posición angular exacta
     const fullSpins = 6 * 360;
-    // Puntero en la parte superior (270 grados o ajuste de offset)
     const targetAngle = fullSpins + (clubs.length - randomIndex) * segmentAngle;
 
-    // Ejecución de la animación en el UI thread a 60 FPS con Reanimated
     rotation.value = 0;
     rotation.value = withTiming(
       targetAngle,
       {
-        duration: 4500, // 4.5 segundos
-        // Easing cúbico hacia afuera para simular desaceleración por fricción mecánica
+        duration: 4500,
         easing: Easing.out(Easing.cubic),
       },
       (finished) => {
         if (finished) {
-          // Volver al hilo JS para actualizar el estado de React y Supabase
           runOnJS(handleSpinEnd)(winningClub);
         }
       }
     );
   };
 
-  // Estilo animado de Reanimated para el contenedor rotativo
   const animatedWheelStyle = useAnimatedStyle(() => {
     return {
       transform: [{ rotate: `${rotation.value}deg` }],
@@ -159,7 +155,6 @@ export const ClubWheelScreen: React.FC = () => {
     );
   }
 
-  // VISTA A: El usuario ya tiene su club oficial asignado de forma persistente
   if (profile?.has_spun_wheel && assignedClub) {
     return (
       <View style={styles.container}>
@@ -184,7 +179,6 @@ export const ClubWheelScreen: React.FC = () => {
               <Text style={styles.badgePersistentText}>CLUB ASIGNADO PARA EL TORNEO</Text>
             </View>
 
-            {/* Carta EA FC del Club Asignado */}
             <View style={styles.clubCard}>
               <LinearGradient
                 colors={['#1e293b', '#0f172a']}
@@ -218,15 +212,19 @@ export const ClubWheelScreen: React.FC = () => {
               </LinearGradient>
             </View>
 
-            <TouchableOpacity style={styles.readyButton} activeOpacity={0.85}>
+            <TouchableOpacity
+              style={styles.readyButton}
+              activeOpacity={0.85}
+              onPress={handleGoToLeaderboard}
+            >
               <LinearGradient
                 colors={['#00ff87', '#60efff']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.readyButtonGradient}
               >
-                <Text style={styles.readyButtonText}>IR A LA SALA DE TORNEO</Text>
-                <Ionicons name="arrow-forward" size={18} color="#070a0f" />
+                <Text style={styles.readyButtonText}>IR A POSICIONES</Text>
+                <Ionicons name="trophy-outline" size={18} color="#070a0f" />
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -235,7 +233,6 @@ export const ClubWheelScreen: React.FC = () => {
     );
   }
 
-  // VISTA B: Primer Acceso - Ruleta Animada Interactiva
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
@@ -243,7 +240,6 @@ export const ClubWheelScreen: React.FC = () => {
         colors={['#070a0f', '#0d131f', '#081726']}
         style={styles.gradientBackground}
       >
-        {/* Header */}
         <View style={styles.wheelHeader}>
           <Text style={styles.wheelTitle}>RULETA DE ASIGNACIÓN</Text>
           <Text style={styles.wheelSubtitle}>
@@ -251,16 +247,12 @@ export const ClubWheelScreen: React.FC = () => {
           </Text>
         </View>
 
-        {/* Contenedor de la Ruleta y Puntero */}
         <View style={styles.wheelWrapper}>
-          {/* Puntero Indicador Superior */}
           <View style={styles.pointerContainer}>
             <View style={styles.pointerTriangle} />
           </View>
 
-          {/* Disco Animado de la Ruleta */}
           <Animated.View style={[styles.wheelCircle, animatedWheelStyle]}>
-            {/* Círculos decorativos y división visual */}
             <View style={styles.wheelCenterRing}>
               <LinearGradient
                 colors={['#00ff87', '#00b4d8']}
@@ -270,7 +262,6 @@ export const ClubWheelScreen: React.FC = () => {
               </LinearGradient>
             </View>
 
-            {/* Simulación visual de radios/clubes en la circunferencia */}
             {clubs.slice(0, 12).map((club, index) => {
               const angle = (index * (360 / 12)) * (Math.PI / 180);
               const x = RADIUS + (RADIUS - 40) * Math.cos(angle) - 16;
@@ -299,7 +290,6 @@ export const ClubWheelScreen: React.FC = () => {
           </Animated.View>
         </View>
 
-        {/* Botón de Giro */}
         <View style={styles.actionContainer}>
           <TouchableOpacity
             style={[styles.spinButton, isSpinning && styles.spinButtonDisabled]}
@@ -329,7 +319,6 @@ export const ClubWheelScreen: React.FC = () => {
           </Text>
         </View>
 
-        {/* Modal de Revelación de Club Ganador */}
         {winnerModalVisible && selectedClub && (
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
@@ -357,9 +346,12 @@ export const ClubWheelScreen: React.FC = () => {
 
               <TouchableOpacity
                 style={styles.modalConfirmBtn}
-                onPress={() => setWinnerModalVisible(false)}
+                onPress={() => {
+                  setWinnerModalVisible(false);
+                  handleGoToLeaderboard();
+                }}
               >
-                <Text style={styles.modalConfirmBtnText}>CONTINUAR AL TORNEO</Text>
+                <Text style={styles.modalConfirmBtnText}>IR A POSICIONES</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -645,7 +637,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(7, 10, 15, 0.88)',
     justifyContent: 'center',
     alignItems: 'center',

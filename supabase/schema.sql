@@ -44,9 +44,7 @@ END $$;
 -- 3. TABLAS PRINCIPALES
 -- ==============================================================================
 
--- ------------------------------------------------------------------------------
--- 3.1. LIGAS (Las 5 grandes ligas de Europa)
--- ------------------------------------------------------------------------------
+-- 3.1. LIGAS
 CREATE TABLE IF NOT EXISTS public.leagues (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) NOT NULL UNIQUE,
@@ -55,9 +53,7 @@ CREATE TABLE IF NOT EXISTS public.leagues (
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- ------------------------------------------------------------------------------
--- 3.2. CLUBES (Top 5 clubes por liga = 25 clubes europeos)
--- ------------------------------------------------------------------------------
+-- 3.2. CLUBES
 CREATE TABLE IF NOT EXISTS public.clubs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     league_id UUID NOT NULL REFERENCES public.leagues(id) ON DELETE CASCADE,
@@ -68,14 +64,12 @@ CREATE TABLE IF NOT EXISTS public.clubs (
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- ------------------------------------------------------------------------------
--- 3.3. JUGADORES (Ingesta masiva vía Scraping de planteles oficiales)
--- ------------------------------------------------------------------------------
+-- 3.3. JUGADORES
 CREATE TABLE IF NOT EXISTS public.players (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE CASCADE,
     name VARCHAR(120) NOT NULL,
-    position VARCHAR(10) NOT NULL, -- GK, CB, LB, RB, CDM, CM, CAM, RW, LW, ST
+    position VARCHAR(10) NOT NULL,
     rating INT CHECK (rating BETWEEN 40 AND 99) NOT NULL,
     pace INT CHECK (pace BETWEEN 0 AND 99),
     shooting INT CHECK (shooting BETWEEN 0 AND 99),
@@ -88,9 +82,7 @@ CREATE TABLE IF NOT EXISTS public.players (
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- ------------------------------------------------------------------------------
--- 3.4. PERFILES DE USUARIO (Extensión de auth.users con asignación persistente)
--- ------------------------------------------------------------------------------
+-- 3.4. PERFILES DE USUARIO
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT NOT NULL,
@@ -103,9 +95,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- ------------------------------------------------------------------------------
 -- 3.5. TORNEOS
--- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.tournaments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(150) NOT NULL,
@@ -117,9 +107,7 @@ CREATE TABLE IF NOT EXISTS public.tournaments (
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- ------------------------------------------------------------------------------
 -- 3.6. PARTICIPANTES DEL TORNEO
--- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.tournament_participants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tournament_id UUID NOT NULL REFERENCES public.tournaments(id) ON DELETE CASCADE,
@@ -127,47 +115,40 @@ CREATE TABLE IF NOT EXISTS public.tournament_participants (
     club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE RESTRICT,
     joined_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE(tournament_id, user_id),
-    UNIQUE(tournament_id, club_id) -- Regla: Un club asignado por participante en el torneo
+    UNIQUE(tournament_id, club_id)
 );
 
--- ------------------------------------------------------------------------------
 -- 3.7. JORNADAS / FECHAS DEL CALENDARIO
--- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.rounds (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tournament_id UUID NOT NULL REFERENCES public.tournaments(id) ON DELETE CASCADE,
     round_number INT NOT NULL,
-    name VARCHAR(50) NOT NULL, -- Ej: 'Jornada 1', 'Fecha 1 (Ida)'
-    is_active BOOLEAN DEFAULT FALSE NOT NULL, -- Habilitada secuencialmente por el Admin
+    name VARCHAR(50) NOT NULL,
+    is_active BOOLEAN DEFAULT FALSE NOT NULL,
     is_completed BOOLEAN DEFAULT FALSE NOT NULL,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE(tournament_id, round_number)
 );
 
--- ------------------------------------------------------------------------------
--- 3.8. PARTIDOS (Matches) CON SISTEMA DE HANDSHAKE Y VALIDACIÓN CRUZADA
--- ------------------------------------------------------------------------------
+-- 3.8. PARTIDOS
 CREATE TABLE IF NOT EXISTS public.matches (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tournament_id UUID NOT NULL REFERENCES public.tournaments(id) ON DELETE CASCADE,
     round_id UUID NOT NULL REFERENCES public.rounds(id) ON DELETE CASCADE,
     
-    -- Local
     home_user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
     home_club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE RESTRICT,
     home_score INT DEFAULT 0 NOT NULL CHECK (home_score >= 0),
     
-    -- Visitante
     away_user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
     away_club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE RESTRICT,
     away_score INT DEFAULT 0 NOT NULL CHECK (away_score >= 0),
     
-    -- Estado de la partida y Handshake
     status match_status DEFAULT 'scheduled' NOT NULL,
-    local_submitted_at TIMESTAMPTZ,     -- Marca de tiempo cuando el local envió el marcador final
-    visitor_reviewed_at TIMESTAMPTZ,    -- Marca de tiempo cuando el visitante aceptó o rechazó
-    dispute_reason TEXT,                -- Motivo si el visitante rechazó el marcador
-    resolved_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL, -- Admin que resuelve
+    local_submitted_at TIMESTAMPTZ,
+    visitor_reviewed_at TIMESTAMPTZ,
+    dispute_reason TEXT,
+    resolved_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -175,30 +156,24 @@ CREATE TABLE IF NOT EXISTS public.matches (
     CONSTRAINT different_users CHECK (home_user_id <> away_user_id)
 );
 
--- ------------------------------------------------------------------------------
--- 3.9. EVENTOS DE PARTIDO EN VIVO (Goles, Tarjetas)
--- ------------------------------------------------------------------------------
+-- 3.9. EVENTOS DE PARTIDO EN VIVO
 CREATE TABLE IF NOT EXISTS public.match_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     match_id UUID NOT NULL REFERENCES public.matches(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT, -- Usuario que registra el evento
-    club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE RESTRICT,   -- Club al que pertenece el evento
-    player_id UUID REFERENCES public.players(id) ON DELETE SET NULL,        -- Jugador involucrado
-    event_type match_event_type NOT NULL,                                   -- goal, yellow_card, red_card
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
+    club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE RESTRICT,
+    player_id UUID REFERENCES public.players(id) ON DELETE SET NULL,
+    event_type match_event_type NOT NULL,
     minute INT CHECK (minute BETWEEN 1 AND 130) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- ------------------------------------------------------------------------------
--- 3.10. PIZARRA TÁCTICA Y ALINEACIÓN (Coordenadas en Canvas 2D)
--- ------------------------------------------------------------------------------
+-- 3.10. PIZARRA TÁCTICA Y ALINEACIÓN
 CREATE TABLE IF NOT EXISTS public.tactics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE CASCADE,
     formation VARCHAR(20) DEFAULT '4-3-3' NOT NULL,
-    -- Estructura de positions:
-    -- [ { "player_id": "...", "x": 0.50, "y": 0.85, "is_starter": true, "position_label": "ST" }, ... ]
     positions JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -206,7 +181,7 @@ CREATE TABLE IF NOT EXISTS public.tactics (
 );
 
 -- ==============================================================================
--- 4. ÍNDICES DE ALTO RENDIMIENTO (Optimización para lecturas concurrentes)
+-- 4. ÍNDICES DE ALTO RENDIMIENTO
 -- ==============================================================================
 CREATE INDEX IF NOT EXISTS idx_clubs_league_id ON public.clubs(league_id);
 CREATE INDEX IF NOT EXISTS idx_players_club_id ON public.players(club_id);
@@ -220,7 +195,6 @@ CREATE INDEX IF NOT EXISTS idx_tournament_participants_tourn ON public.tournamen
 -- 5. FUNCIONES Y TRIGGERS DE NEGOCIO
 -- ==============================================================================
 
--- 5.1. Actualización automática de updated_at
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -245,9 +219,6 @@ CREATE OR REPLACE TRIGGER set_tactics_updated_at
 BEFORE UPDATE ON public.tactics
 FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
--- ------------------------------------------------------------------------------
--- 5.2. Crear Perfil automáticamente al registrarse en auth.users
--- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -267,9 +238,6 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 AFTER INSERT ON auth.users
 FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- ------------------------------------------------------------------------------
--- 5.3. Actualizar automáticamente los goles en public.matches al registrar un match_event 'goal'
--- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handle_match_goal_event()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -300,13 +268,10 @@ AFTER INSERT ON public.match_events
 FOR EACH ROW EXECUTE FUNCTION public.handle_match_goal_event();
 
 -- ==============================================================================
--- 6. VISTA DINÁMICA: TABLA DE POSICIONES EN TIEMPO REAL
+-- 6. VISTA DINÁMICA: TABLA DE POSICIONES
 -- ==============================================================================
--- Reglas estándar: 3 pts victoria, 1 pt empate, 0 derrota.
--- Solo contabiliza partidos en estado 'finished'.
 CREATE OR REPLACE VIEW public.leaderboard_view AS
 WITH match_results AS (
-    -- Resultados desde la perspectiva del equipo local
     SELECT
         m.tournament_id,
         m.home_user_id AS user_id,
@@ -327,7 +292,6 @@ WITH match_results AS (
 
     UNION ALL
 
-    -- Resultados desde la perspectiva del equipo visitante
     SELECT
         m.tournament_id,
         m.away_user_id AS user_id,
@@ -373,10 +337,9 @@ GROUP BY tp.tournament_id, p.id, p.username, c.id, c.name, c.short_name, c.logo_
 ORDER BY pts DESC, dg DESC, gf DESC, c.name ASC;
 
 -- ==============================================================================
--- 7. ROW LEVEL SECURITY (RLS) - POLÍTICAS DE SEGURIDAD ESTRICTAS
+-- 7. ROW LEVEL SECURITY (RLS) - POLÍTICAS IDEMPOTENTES
 -- ==============================================================================
 
--- Habilitar RLS en todas las tablas
 ALTER TABLE public.leagues ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clubs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.players ENABLE ROW LEVEL SECURITY;
@@ -388,9 +351,6 @@ ALTER TABLE public.matches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.match_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tactics ENABLE ROW LEVEL SECURITY;
 
--- ------------------------------------------------------------------------------
--- 7.1. Función auxiliar para verificar si el usuario conectado es Administrador
--- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
@@ -401,76 +361,80 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- ------------------------------------------------------------------------------
--- 7.2. LIGAS, CLUBES Y JUGADORES (Lectura pública; Escritura Admin o Ingesta)
--- ------------------------------------------------------------------------------
+-- 7.2. LIGAS, CLUBES Y JUGADORES
+DROP POLICY IF EXISTS "Leagues are viewable by authenticated users" ON public.leagues;
 CREATE POLICY "Leagues are viewable by authenticated users"
 ON public.leagues FOR SELECT
 TO authenticated, anon
 USING (true);
 
+DROP POLICY IF EXISTS "Leagues editable only by admin" ON public.leagues;
 CREATE POLICY "Leagues editable only by admin"
 ON public.leagues FOR ALL
 TO authenticated
 USING (public.is_admin());
 
+DROP POLICY IF EXISTS "Clubs are viewable by authenticated users" ON public.clubs;
 CREATE POLICY "Clubs are viewable by authenticated users"
 ON public.clubs FOR SELECT
 TO authenticated, anon
 USING (true);
 
+DROP POLICY IF EXISTS "Clubs editable only by admin" ON public.clubs;
 CREATE POLICY "Clubs editable only by admin"
 ON public.clubs FOR ALL
 TO authenticated
 USING (public.is_admin());
 
+DROP POLICY IF EXISTS "Players are viewable by authenticated users" ON public.players;
 CREATE POLICY "Players are viewable by authenticated users"
 ON public.players FOR SELECT
 TO authenticated, anon
 USING (true);
 
+DROP POLICY IF EXISTS "Players editable only by admin" ON public.players;
 CREATE POLICY "Players editable only by admin"
 ON public.players FOR ALL
 TO authenticated
 USING (public.is_admin());
 
--- ------------------------------------------------------------------------------
 -- 7.3. PROFILES
--- ------------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Profiles are viewable by all authenticated users" ON public.profiles;
 CREATE POLICY "Profiles are viewable by all authenticated users"
 ON public.profiles FOR SELECT
 TO authenticated
 USING (true);
 
--- El usuario puede actualizar su propio perfil (ej: username, avatar, ruleta)
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile"
 ON public.profiles FOR UPDATE
 TO authenticated
 USING (auth.uid() = id)
 WITH CHECK (
     auth.uid() = id 
-    -- Evitar que un usuario se cambie a sí mismo el rol a 'admin'
     AND (role = (SELECT role FROM public.profiles WHERE id = auth.uid()))
 );
 
--- ------------------------------------------------------------------------------
 -- 7.4. TORNEOS Y PARTICIPANTES
--- ------------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Tournaments viewable by authenticated users" ON public.tournaments;
 CREATE POLICY "Tournaments viewable by authenticated users"
 ON public.tournaments FOR SELECT
 TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "Tournaments manageable by admin" ON public.tournaments;
 CREATE POLICY "Tournaments manageable by admin"
 ON public.tournaments FOR ALL
 TO authenticated
 USING (public.is_admin());
 
+DROP POLICY IF EXISTS "Tournament participants viewable by all" ON public.tournament_participants;
 CREATE POLICY "Tournament participants viewable by all"
 ON public.tournament_participants FOR SELECT
 TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "Users can join tournament or admin can assign" ON public.tournament_participants;
 CREATE POLICY "Users can join tournament or admin can assign"
 ON public.tournament_participants FOR INSERT
 TO authenticated
@@ -478,38 +442,33 @@ WITH CHECK (
     auth.uid() = user_id OR public.is_admin()
 );
 
--- ------------------------------------------------------------------------------
 -- 7.5. JORNADAS / FECHAS (ROUNDS)
--- ------------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Rounds viewable by all authenticated users" ON public.rounds;
 CREATE POLICY "Rounds viewable by all authenticated users"
 ON public.rounds FOR SELECT
 TO authenticated
 USING (true);
 
--- Solo el administrador puede crear o habilitar fechas de juego secuencialmente
+DROP POLICY IF EXISTS "Rounds manageable exclusively by admin" ON public.rounds;
 CREATE POLICY "Rounds manageable exclusively by admin"
 ON public.rounds FOR ALL
 TO authenticated
 USING (public.is_admin());
 
--- ------------------------------------------------------------------------------
--- 7.6. PARTIDOS (MATCHES) - Handshake y Arbitraje Remoto
--- ------------------------------------------------------------------------------
+-- 7.6. PARTIDOS (MATCHES)
+DROP POLICY IF EXISTS "Matches viewable by all authenticated users" ON public.matches;
 CREATE POLICY "Matches viewable by all authenticated users"
 ON public.matches FOR SELECT
 TO authenticated
 USING (true);
 
--- Solo el admin puede generar el fixture inicial (INSERT)
+DROP POLICY IF EXISTS "Admin can insert matches" ON public.matches;
 CREATE POLICY "Admin can insert matches"
 ON public.matches FOR INSERT
 TO authenticated
 WITH CHECK (public.is_admin());
 
--- ACTUALIZACIÓN DE PARTIDOS:
--- 1. El Admin puede actualizar cualquier partido (resolver disputas).
--- 2. El Local puede iniciar partido ('live') y enviar resultado ('pending_approval').
--- 3. El Visitante puede confirmar ('finished') o disputar ('disputed') en handshake.
+DROP POLICY IF EXISTS "Users can update their own active matches or admin" ON public.matches;
 CREATE POLICY "Users can update their own active matches or admin"
 ON public.matches FOR UPDATE
 TO authenticated
@@ -521,60 +480,54 @@ USING (
 WITH CHECK (
     public.is_admin()
     OR (
-        -- Regla Local: puede pasar a 'live' o 'pending_approval' con marcador
         auth.uid() = home_user_id 
         AND status IN ('scheduled', 'live', 'pending_approval')
     )
     OR (
-        -- Regla Visitante: puede responder al handshake validando ('finished') o rechazando ('disputed')
         auth.uid() = away_user_id 
         AND status IN ('pending_approval', 'finished', 'disputed')
     )
 );
 
--- ------------------------------------------------------------------------------
 -- 7.7. EVENTOS DE PARTIDO EN VIVO (MATCH EVENTS)
--- Restricción estricta: Modificar ÚNICAMENTE estadísticas del equipo propio
--- ------------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Match events viewable by all authenticated users" ON public.match_events;
 CREATE POLICY "Match events viewable by all authenticated users"
 ON public.match_events FOR SELECT
 TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "Strict team event registration" ON public.match_events;
 CREATE POLICY "Strict team event registration"
 ON public.match_events FOR INSERT
 TO authenticated
 WITH CHECK (
-    -- 1. El usuario debe ser el autor del registro
     auth.uid() = user_id
-    -- 2. El usuario debe ser participante del partido (Local o Visitante)
     AND EXISTS (
         SELECT 1 FROM public.matches m
         WHERE m.id = match_id
-          AND m.status = 'live' -- El partido debe estar en juego
+          AND m.status IN ('scheduled', 'live')
           AND (
-              -- Si el usuario es local, el evento DEBE ser para su club local
               (m.home_user_id = auth.uid() AND m.home_club_id = club_id)
               OR
-              -- Si el usuario es visitante, el evento DEBE ser para su club visitante
               (m.away_user_id = auth.uid() AND m.away_club_id = club_id)
           )
     )
 );
 
--- ------------------------------------------------------------------------------
 -- 7.8. PIZARRA TÁCTICA (TACTICS)
--- ------------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Users can view any team tactics" ON public.tactics;
 CREATE POLICY "Users can view any team tactics"
 ON public.tactics FOR SELECT
 TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "Users can insert their own tactics" ON public.tactics;
 CREATE POLICY "Users can insert their own tactics"
 ON public.tactics FOR INSERT
 TO authenticated
 WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update only their own tactics" ON public.tactics;
 CREATE POLICY "Users can update only their own tactics"
 ON public.tactics FOR UPDATE
 TO authenticated
@@ -582,10 +535,32 @@ USING (auth.uid() = user_id)
 WITH CHECK (auth.uid() = user_id);
 
 -- ==============================================================================
--- 8. HABILITAR SUPABASE REALTIME (WebSockets en tiempo real)
+-- 8. HABILITAR SUPABASE REALTIME & PERMISOS
 -- ==============================================================================
--- Permite que la app móvil reciba eventos INSERT/UPDATE al instante en clientes Expo
-ALTER PUBLICATION supabase_realtime ADD TABLE public.matches;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.match_events;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.rounds;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.tactics;
+DO $$ BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.matches;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.match_events;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.rounds;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.tactics;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated, anon;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
