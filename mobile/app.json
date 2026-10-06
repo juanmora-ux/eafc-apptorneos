@@ -23,7 +23,8 @@
         {
           "initialOrientation": "DEFAULT"
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }
